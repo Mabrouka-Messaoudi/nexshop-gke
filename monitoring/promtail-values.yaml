@@ -1,0 +1,43 @@
+# Promtail : DaemonSet sur tous les nœuds (tolère tous les taints).
+config:
+  clients:
+  - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+  snippets:
+    extraRelabelConfigs:
+    - action: replace
+      source_labels:
+      - __meta_kubernetes_pod_node_name
+      target_label: node_name
+    - action: replace
+      source_labels:
+      - __meta_kubernetes_namespace
+      target_label: namespace
+    - action: replace
+      source_labels:
+      - __meta_kubernetes_pod_name
+      target_label: pod
+    - action: replace
+      source_labels:
+      - __meta_kubernetes_pod_container_name
+      target_label: container
+    pipelineStages:
+    - cri: {}
+    - labeldrop:
+      - filename
+daemonset:
+  enabled: true
+extraArgs:
+- --client.external-labels=cluster=nexshop
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+tolerations:
+- operator: Exists

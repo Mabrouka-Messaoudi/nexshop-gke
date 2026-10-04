@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  endpoints:
+  - interval: 15s
+    path: /metrics
+    port: tempo-prom-metrics
+    relabelings:
+    - action: replace
+      replacement: tempo
+      sourceLabels:
+      - __meta_kubernetes_service_name
+      targetLabel: job
+  namespaceSelector:
+    matchNames:
+    - monitoring
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: tempo
+      app.kubernetes.io/name: tempo

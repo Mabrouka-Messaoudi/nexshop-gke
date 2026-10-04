@@ -1,0 +1,1346 @@
+# Deployments NexShop (namespace nexshop) — appliqués par scripts/deploy.sh
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api-gateway
+  name: api-gateway
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: api-gateway
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - env:
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER-URI
+          valueFrom:
+            configMapKeyRef:
+              key: KEYCLOAK_ISSUER_URI
+              name: nexshop-config
+        - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI
+          value: http://keycloak:8080/realms/spring-microservices-security-realm/protocol/openid-connect/certs
+        - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+          value: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+        - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+          value: '1.0'
+        - name: MANAGEMENT_OBSERVATIONS_KEY-VALUES_APPLICATION
+          value: api-gateway
+        - name: SERVER_PORT
+          value: '9000'
+        - name: PRODUCT_SERVICE_URL
+          valueFrom:
+            configMapKeyRef:
+              key: PRODUCT_SERVICE_URL
+              name: nexshop-config
+        - name: ORDER_SERVICE_URL
+          valueFrom:
+            configMapKeyRef:
+              key: ORDER_SERVICE_URL
+              name: nexshop-config
+        - name: INVENTORY_SERVICE_URL
+          valueFrom:
+            configMapKeyRef:
+              key: INVENTORY_URL
+              name: nexshop-config
+        - name: JAVA_OPTS
+          value: -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseContainerSupport
+        - name: SPRING_APPLICATION_NAME
+          value: api-gateway
+        - name: SPRING_ZIPKIN_ENABLED
+          value: 'true'
+        - name: RESILIENCE4J_TIMELIMITER_INSTANCES_DEFAULT_TIMEOUTDURATION
+          value: 3s
+        - name: RESILIENCE4J_CIRCUITBREAKER_INSTANCES_DEFAULT_SLOWCALLDURATIONTHRESHOLD
+          value: 3s
+        - name: RESILIENCE4J_CIRCUITBREAKER_INSTANCES_DEFAULT_SLOWCALLRATETHRESHOLD
+          value: '50'
+        - name: RESILIENCE4J_CIRCUITBREAKER_INSTANCES_DEFAULT_FAILURERATETHRESHOLD
+          value: '50'
+        image: mabroukamessaoudi1/api-gateway:v20260427085431
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /actuator/health
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 320
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: api-gateway
+        ports:
+        - containerPort: 9000
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /actuator/health
+            port: 9000
+            scheme: HTTP
+          initialDelaySeconds: 300
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 400m
+            memory: 768Mi
+          requests:
+            cpu: 150m
+            memory: 128Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z keycloak 8080; do echo waiting for keycloak; sleep 5; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-keycloak
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - command:
+        - sh
+        - -c
+        - until nc -z order-service 8081; do echo waiting for order-service; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-order-service
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: frontend
+  name: frontend
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - env:
+        - name: API_GATEWAY_URL
+          value: https://nexshop-mab.duckdns.org:30214
+        - name: KEYCLOAK_URL
+          value: https://nexshop-mab.duckdns.org:30214/keycloak
+        image: mabroukamessaoudi1/frontend:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 443
+            scheme: HTTPS
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: frontend
+        ports:
+        - containerPort: 443
+          protocol: TCP
+        - containerPort: 80
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 443
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /etc/nginx/conf.d/default.conf
+          name: nginx-config
+          subPath: nginx.conf
+        - mountPath: /etc/nginx/certs
+          name: tls-certs
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: frontend-nginx-config
+        name: nginx-config
+      - name: tls-certs
+        secret:
+          defaultMode: 420
+          secretName: frontend-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: inventory-service
+  name: inventory-service
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: inventory-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: inventory-service
+    spec:
+      containers:
+      - env:
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:mysql://mysql:3306/inventory_service
+        - name: SPRING_DATASOURCE_USERNAME
+          value: root
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: root-password
+              name: mysql-secret
+        - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+          value: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+        - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+          value: '1.0'
+        - name: MANAGEMENT_OBSERVATIONS_KEY-VALUES_APPLICATION
+          value: inventory-service
+        - name: SERVER_PORT
+          value: '8082'
+        - name: JAVA_OPTS
+          value: -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseContainerSupport
+        - name: SPRING_APPLICATION_NAME
+          value: inventory-service
+        - name: SPRING_ZIPKIN_ENABLED
+          value: 'true'
+        image: mabroukamessaoudi1/inventory-service:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 8
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8082
+            scheme: HTTP
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: inventory-service
+        ports:
+        - containerPort: 8082
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 8
+          httpGet:
+            path: /actuator/health
+            port: 8082
+            scheme: HTTP
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 600m
+            memory: 1200Mi
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z mysql 3306; do echo waiting for mysql; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-mysql
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: kafka
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        - name: KAFKA_BROKER_ID
+          value: '1'
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: zookeeper:2181
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+        - name: KAFKA_LISTENERS
+          value: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: INTERNAL://$(POD_IP):29092,EXTERNAL://kafka:9092
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: INTERNAL
+        - name: KAFKA_PORT
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: '1'
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: 'true'
+        image: confluentinc/cp-kafka:7.5.0
+        imagePullPolicy: IfNotPresent
+        name: kafka
+        ports:
+        - containerPort: 9092
+          protocol: TCP
+        - containerPort: 29092
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 6
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 29092
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 1500m
+            memory: 768Mi
+          requests:
+            cpu: 500m
+            memory: 768Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/kafka/data
+          name: kafka-data
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: kafka-data
+        persistentVolumeClaim:
+          claimName: kafka-pvc
+      initContainers:
+      - name: cleanup-lost-found
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - rm -rf /var/lib/kafka/data/lost+found
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: kafka-ui
+  name: kafka-ui
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: kafka-ui
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      containers:
+      - env:
+        - name: KAFKA_CLUSTERS_NAME
+          value: nexshop
+        - name: KAFKA_CLUSTERS_BOOTSTRAPSERVERS
+          value: kafka:29092
+        - name: KAFKA_CLUSTERS_SCHEMAREGISTRY
+          value: http://schema-registry:8081
+        - name: DYNAMIC_CONFIG_ENABLED
+          value: 'true'
+        image: provectuslabs/kafka-ui:latest
+        imagePullPolicy: Always
+        name: kafka-ui
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 128Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: keycloak
+  name: keycloak
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: keycloak
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      containers:
+      - args:
+        - start-dev
+        - --import-realm
+        env:
+        - name: DB_VENDOR
+          value: mysql
+        - name: DB_ADDR
+          value: keycloak-mysql
+        - name: DB_DATABASE
+          value: keycloak
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: db-user
+              name: keycloak-secret
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: db-password
+              name: keycloak-secret
+        - name: KEYCLOAK_ADMIN
+          valueFrom:
+            secretKeyRef:
+              key: admin-user
+              name: keycloak-secret
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: admin-password
+              name: keycloak-secret
+        - name: KC_DB_POOL_MIN_SIZE
+          value: '10'
+        - name: KC_DB_POOL_MAX_SIZE
+          value: '80'
+        - name: KC_DB_POOL_INITIAL_SIZE
+          value: '20'
+        image: quay.io/keycloak/keycloak:24.0.1
+        imagePullPolicy: IfNotPresent
+        name: keycloak
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /realms/master
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1536Mi
+          requests:
+            cpu: 400m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /opt/keycloak/data/import
+          name: realm-config
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z keycloak-mysql 3306; do echo waiting for mysql; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-mysql
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: keycloak-realm
+        name: realm-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: keycloak-mysql
+  name: keycloak-mysql
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: keycloak-mysql
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: keycloak-mysql
+    spec:
+      containers:
+      - env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: root
+        - name: MYSQL_DATABASE
+          value: keycloak
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              key: db-user
+              name: keycloak-secret
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: db-password
+              name: keycloak-secret
+        image: mysql:8
+        imagePullPolicy: IfNotPresent
+        name: keycloak-mysql
+        ports:
+        - containerPort: 3306
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 300m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: keycloak-mysql-data
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: keycloak-mysql-data
+        persistentVolumeClaim:
+          claimName: keycloak-mysql-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mailhog
+  name: mailhog
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: mailhog
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: mailhog
+    spec:
+      containers:
+      - image: mailhog/mailhog:v1.0.1
+        imagePullPolicy: IfNotPresent
+        name: mailhog
+        ports:
+        - containerPort: 1025
+          name: smtp
+          protocol: TCP
+        - containerPort: 8025
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mongodb
+  name: mongodb
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: mongodb
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: root-username
+              name: mongodb-secret
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: root-password
+              name: mongodb-secret
+        - name: MONGO_INITDB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: database
+              name: mongodb-secret
+        image: mongo:7.0.5
+        imagePullPolicy: IfNotPresent
+        name: mongodb
+        ports:
+        - containerPort: 27017
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 27017
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 300m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /data/db
+          name: mongodb-data
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: mongodb-data
+        persistentVolumeClaim:
+          claimName: mongodb-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mysql
+  name: mysql
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: mysql
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - args:
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_unicode_ci
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: root-password
+              name: mysql-secret
+        image: mysql:8.3.0
+        imagePullPolicy: IfNotPresent
+        name: mysql
+        ports:
+        - containerPort: 3306
+          protocol: TCP
+        readinessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+            - -uroot
+            - -pmysql
+          failureThreshold: 3
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1Gi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: mysql-data
+        - mountPath: /docker-entrypoint-initdb.d
+          name: mysql-init
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: mysql-data
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+      - configMap:
+          defaultMode: 420
+          name: mysql-init-sql
+        name: mysql-init
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: notification-service
+  name: notification-service
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: notification-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+      - env:
+        - name: SPRING_KAFKA_BOOTSTRAP-SERVERS
+          valueFrom:
+            configMapKeyRef:
+              key: KAFKA_BOOTSTRAP_SERVERS
+              name: nexshop-config
+        - name: SPRING_KAFKA_CONSUMER_PROPERTIES_SCHEMA_REGISTRY_URL
+          valueFrom:
+            configMapKeyRef:
+              key: SCHEMA_REGISTRY_URL
+              name: nexshop-config
+        - name: SPRING_MAIL_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: mail-secret
+        - name: SPRING_MAIL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: mail-secret
+        - name: SPRING_MAIL_HOST
+          value: mailhog
+        - name: SPRING_MAIL_PORT
+          value: '1025'
+        - name: SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH
+          value: 'false'
+        - name: SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE
+          value: 'false'
+        - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+          value: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+        - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+          value: '1.0'
+        - name: MANAGEMENT_OBSERVATIONS_KEY-VALUES_APPLICATION
+          value: notification-service
+        - name: LOKI4J_CLIENT_HTTP_URL
+          valueFrom:
+            configMapKeyRef:
+              key: LOKI_URL
+              name: nexshop-config
+        - name: SERVER_PORT
+          value: '8083'
+        - name: MANAGEMENT_HEALTH_MAIL_ENABLED
+          value: 'false'
+        - name: JAVA_OPTS
+          value: -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseContainerSupport
+        - name: SPRING_APPLICATION_NAME
+          value: notification-service
+        - name: SPRING_ZIPKIN_ENABLED
+          value: 'true'
+        image: mabroukamessaoudi1/notification-service:latest
+        imagePullPolicy: Always
+        name: notification-service
+        ports:
+        - containerPort: 8083
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health
+            port: 8083
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 200m
+            memory: 768Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z kafka 9092; do echo waiting for kafka; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-kafka
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: order-service
+  name: order-service
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: order-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+      - env:
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:mysql://mysql:3306/order_service
+        - name: SPRING_DATASOURCE_USERNAME
+          value: root
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: root-password
+              name: mysql-secret
+        - name: INVENTORY_URL
+          valueFrom:
+            configMapKeyRef:
+              key: INVENTORY_URL
+              name: nexshop-config
+        - name: SPRING_KAFKA_BOOTSTRAP-SERVERS
+          valueFrom:
+            configMapKeyRef:
+              key: KAFKA_BOOTSTRAP_SERVERS
+              name: nexshop-config
+        - name: SPRING_KAFKA_PRODUCER_PROPERTIES_SCHEMA_REGISTRY_URL
+          valueFrom:
+            configMapKeyRef:
+              key: SCHEMA_REGISTRY_URL
+              name: nexshop-config
+        - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+          value: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+        - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+          value: '1.0'
+        - name: MANAGEMENT_OBSERVATIONS_KEY-VALUES_APPLICATION
+          value: order-service
+        - name: SERVER_PORT
+          value: '8081'
+        - name: JAVA_OPTS
+          value: -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+UseContainerSupport
+        - name: SPRING_APPLICATION_NAME
+          value: order-service
+        - name: SPRING_ZIPKIN_ENABLED
+          value: 'true'
+        - name: JAVA_TOOL_OPTIONS
+          value: -Xmx700m -Xms384m
+        image: mabroukamessaoudi1/order-service:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 8
+          httpGet:
+            path: /actuator/health
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: order-service
+        ports:
+        - containerPort: 8081
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 5
+          httpGet:
+            path: /actuator/health
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 90
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 800m
+            memory: 1100Mi
+          requests:
+            cpu: 300m
+            memory: 600Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z mysql 3306; do echo waiting for mysql; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-mysql
+        resources:
+          limits:
+            cpu: 800m
+            memory: 1100Mi
+          requests:
+            cpu: 300m
+            memory: 600Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - command:
+        - sh
+        - -c
+        - until nc -z kafka 9092; do echo waiting for kafka; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-kafka
+        resources:
+          limits:
+            cpu: 800m
+            memory: 1100Mi
+          requests:
+            cpu: 300m
+            memory: 600Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: product-service
+  name: product-service
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: product-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+      - env:
+        - name: SPRING_DATA_MONGODB_URI
+          value: mongodb://root:password@mongodb:27017/product-service?authSource=admin&authMechanism=SCRAM-SHA-256
+        - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+          value: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+        - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+          value: '1.0'
+        - name: MANAGEMENT_OBSERVATIONS_KEY-VALUES_APPLICATION
+          value: product-service
+        - name: LOKI_URL
+          valueFrom:
+            configMapKeyRef:
+              key: LOKI_URL
+              name: nexshop-config
+        - name: JAVA_OPTS
+          value: -XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=40.0 -XX:MaxMetaspaceSize=150m -XX:+UseContainerSupport
+        - name: SPRING_APPLICATION_NAME
+          value: product-service
+        - name: SPRING_ZIPKIN_ENABLED
+          value: 'true'
+        image: mabroukamessaoudi1/product-service:latest
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /actuator/health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 15
+        name: product-service
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /actuator/health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 140
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 15
+        resources:
+          limits:
+            cpu: 400m
+            memory: 2Gi
+          requests:
+            cpu: 150m
+            memory: 512Mi
+        startupProbe:
+          failureThreshold: 30
+          httpGet:
+            path: /actuator/health
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 5
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - name: loki-proxy
+        image: alpine/socat
+        args:
+        - TCP-LISTEN:3100,fork,reuseaddr
+        - TCP:loki.monitoring.svc.cluster.local:3100
+        ports:
+        - containerPort: 3100
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z mongodb 27017; do echo waiting for mongodb; sleep 3; done
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: wait-for-mongodb
+        resources:
+          limits:
+            cpu: 400m
+            memory: 512Mi
+          requests:
+            cpu: 150m
+            memory: 250Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: schema-registry
+  name: schema-registry
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: schema-registry
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: schema-registry
+    spec:
+      containers:
+      - env:
+        - name: SCHEMA_REGISTRY_HOST_NAME
+          value: schema-registry
+        - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+          value: kafka:9092
+        - name: SCHEMA_REGISTRY_LISTENERS
+          value: http://0.0.0.0:8081
+        image: confluentinc/cp-schema-registry:7.5.0
+        imagePullPolicy: IfNotPresent
+        name: schema-registry
+        ports:
+        - containerPort: 8081
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 200m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: zookeeper
+  name: zookeeper
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: zookeeper
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: '2181'
+        - name: ZOOKEEPER_TICK_TIME
+          value: '2000'
+        image: confluentinc/cp-zookeeper:7.5.0
+        imagePullPolicy: IfNotPresent
+        name: zookeeper
+        ports:
+        - containerPort: 2181
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 200m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/zookeeper/data
+          name: zookeeper-data
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: zookeeper-data
+        persistentVolumeClaim:
+          claimName: zookeeper-pvc

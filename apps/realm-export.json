@@ -1,0 +1,37 @@
+{
+  "realm": "spring-microservices-security-realm",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "angular-client",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "https://nexshop-mab.duckdns.org:30214/*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "protocol": "openid-connect",
+      "enabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "__TEST_USERNAME__",
+      "email": "mab@nexshop.com",
+      "firstName": "Mab",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__TEST_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

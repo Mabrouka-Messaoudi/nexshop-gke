@@ -1,0 +1,227 @@
+# kube-prometheus-stack sur GKE.
+# - Mot de passe Grafana lu depuis le Secret grafana-admin (créé par scripts/install-monitoring.sh).
+# - Le control plane GKE est géré par Google : etcd, scheduler, controller-manager et kube-proxy
+#   ne sont pas joignables, leur supervision et leurs alertes sont donc désactivées.
+# - serviceMonitorSelectorNilUsesHelmValues=false : Prometheus prend tous les ServiceMonitors.
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector:
+      monitoring: 'true'
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+          storageClassName: standard
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: monitoring
+commonTolerations:
+- effect: NoSchedule
+  key: dedicated
+  operator: Equal
+  value: monitoring
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    configReloaders: true
+    etcd: false
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlas: true
+    kubeControllerManager: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeStateMetrics: true
+    kubelet: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+fullnameOverride: kps
+grafana:
+  additionalDataSources:
+  - access: proxy
+    isDefault: false
+    name: Loki
+    type: loki
+    url: http://loki.monitoring.svc.cluster.local:3100
+  - access: proxy
+    isDefault: false
+    jsonData:
+      httpMethod: GET
+      lokiSearch:
+        datasourceUid: loki
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      serviceMap:
+        datasourceUid: prometheus
+      tracesToLogsV2:
+        customQuery: true
+        datasourceUid: loki
+        filterBySpanID: false
+        filterByTraceID: true
+        query: '{namespace="nexshop", container="${__tags.container}"} |= "${__trace.traceId}"'
+        spanEndTimeShift: 1h
+        spanStartTimeShift: -1h
+        tags:
+        - key: service.name
+          value: container
+      tracesToMetrics:
+        datasourceUid: prometheus
+        queries:
+        - name: Request Rate
+          query: sum(rate(http_server_requests_seconds_count{$__tags}[5m]))
+        tags:
+        - key: service.name
+          value: job
+    name: Tempo
+    type: tempo
+    url: http://tempo.monitoring.svc.cluster.local:3200
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - disableDeletion: false
+        editable: true
+        folder: Kubernetes
+        name: default
+        options:
+          path: /var/lib/grafana/dashboards/default
+        orgId: 1
+        type: file
+  dashboards:
+    default:
+      kubernetes-cluster:
+        datasource: Prometheus
+        gnetId: 7249
+        revision: 1
+      kubernetes-pods:
+        datasource: Prometheus
+        gnetId: 6781
+        revision: 1
+      node-exporter:
+        datasource: Prometheus
+        gnetId: 1860
+        revision: 37
+  nodeSelector:
+    monitoring: 'true'
+  persistence:
+    enabled: true
+    size: 3Gi
+    storageClassName: standard
+  resources:
+    limits:
+      cpu: 300m
+      memory: 400Mi
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  service:
+    nodePort: 32000
+    type: NodePort
+  tolerations:
+  - effect: NoSchedule
+    key: dedicated
+    operator: Equal
+    value: monitoring
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+kube-state-metrics:
+  nodeSelector:
+    monitoring: 'true'
+  tolerations:
+  - effect: NoSchedule
+    key: dedicated
+    operator: Equal
+    value: monitoring
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+  tolerations:
+  - operator: Exists
+prometheus:
+  prometheusSpec:
+    nodeSelector:
+      monitoring: 'true'
+    replicas: 1
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1500Mi
+      requests:
+        cpu: 300m
+        memory: 512Mi
+    retention: 15d
+    retentionSize: 8GB
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+          storageClassName: standard
+    tolerations:
+    - effect: NoSchedule
+      key: dedicated
+      operator: Equal
+      value: monitoring
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeInterval: 15s
+prometheusOperator:
+  nodeSelector:
+    monitoring: 'true'
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  tolerations:
+  - effect: NoSchedule
+    key: dedicated
+    operator: Equal
+    value: monitoring
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

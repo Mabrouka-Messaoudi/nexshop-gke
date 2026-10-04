@@ -1,0 +1,76 @@
+# Services NodePort additionnels pour Prometheus/Loki/Tempo.
+#
+# Pourquoi des NOUVEAUX Services plutôt que patcher les existants (kps-prometheus,
+# loki, tempo) : les trois sont gérés par Helm ("app.kubernetes.io/managed-by: Helm").
+# Un patch direct sur ces Services risque d'être écrasé au prochain `helm upgrade`
+# (et pour kps-prometheus, potentiellement même reconcilié en arrière-plan par le
+# Prometheus Operator). Un Service à part, non tracké par Helm, ne sera jamais
+# touché par une réconciliation -- il vise juste les mêmes pods via le même
+# sélecteur, sans rien modifier d'existant.
+#
+# Ports choisis pour matcher EXACTEMENT les valeurs par défaut de collector_final.py
+# (PROM_URL=localhost:30090, LOKI_URL=localhost:30003, TEMPO_URL=localhost:30622) --
+# aucune modification du script nécessaire après ça.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kps-prometheus-nodeport
+  namespace: monitoring
+  labels:
+    app: kps-prometheus-nodeport
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: prometheus
+    operator.prometheus.io/name: kps-prometheus
+  ports:
+    - name: http-web
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-nodeport
+  namespace: monitoring
+  labels:
+    app: loki-nodeport
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/component: single-binary
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/name: loki
+  ports:
+    - name: http-metrics
+      port: 3100
+      targetPort: http-metrics
+      nodePort: 30003
+      protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-nodeport
+  namespace: monitoring
+  labels:
+    app: tempo-nodeport
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/name: tempo
+  ports:
+    # Le port 3200 sert à la fois les métriques Prometheus internes de Tempo ET son
+    # API de requête (/api/search, /api/traces/{id}) -- c'est celui-là dont
+    # collector_final.py a besoin, pas les ports d'ingestion OTLP/Jaeger/Zipkin.
+    - name: tempo-query-api
+      port: 3200
+      targetPort: 3200
+      nodePort: 30622
+      protocol: TCP

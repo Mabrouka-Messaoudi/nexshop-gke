@@ -1,0 +1,28 @@
+# KEYCLOAK_ISSUER_URI est renseigné par scripts/deploy.sh à partir du NodePort réel de Keycloak.
+# frontend-nginx-config et keycloak-realm sont générés par deploy.sh (apps/nginx.conf, apps/realm-export.json).
+apiVersion: v1
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS order_service CHARACTER SET utf8mb4;
+    CREATE DATABASE IF NOT EXISTS inventory_service CHARACTER SET utf8mb4;
+    GRANT ALL PRIVILEGES ON order_service.* TO 'root'@'%';
+    GRANT ALL PRIVILEGES ON inventory_service.* TO 'root'@'%';
+    FLUSH PRIVILEGES;
+kind: ConfigMap
+metadata:
+  name: mysql-init-sql
+---
+apiVersion: v1
+data:
+  INVENTORY_URL: http://inventory-service:8082
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KEYCLOAK_ISSUER_URI: __KEYCLOAK_ISSUER_URI__
+  KEYCLOAK_JWK_URI: http://keycloak:8080/realms/spring-microservices-security-realm/protocol/openid-connect/certs
+  LOKI_URL: http://loki.monitoring:3100/loki/api/v1/push
+  ORDER_SERVICE_URL: http://order-service:8081
+  PRODUCT_SERVICE_URL: http://product-service:8080
+  SCHEMA_REGISTRY_URL: http://schema-registry:8085
+  ZIPKIN_ENDPOINT: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+kind: ConfigMap
+metadata:
+  name: nexshop-config

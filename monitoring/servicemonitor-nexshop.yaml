@@ -1,0 +1,29 @@
+# Collecte des métriques Spring Boot (/actuator/prometheus) des microservices NexShop.
+# Chaque Service NexShop porte le label
+# app=<nom> et nomme son port « http ».
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nexshop-java-services
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - nexshop
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - api-gateway
+          - product-service
+          - order-service
+          - inventory-service
+          - notification-service
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s
+      scrapeTimeout: 10s

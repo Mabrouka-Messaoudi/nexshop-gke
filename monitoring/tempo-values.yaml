@@ -1,0 +1,37 @@
+# Tempo (chart grafana/tempo). nodeSelector, tolerations, persistence, service et serviceMonitor
+# sont des clés de PREMIER niveau du chart (pas sous « tempo: »).
+# Récepteurs : Zipkin (9411, utilisé par les microservices Spring) et OTLP.
+# API de requête et métriques : port 3200.
+# Le ServiceMonitor du chart est désactivé : monitoring/sm-tempo.yaml le remplace.
+tempo:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  receivers:
+    zipkin:
+      endpoint: 0.0.0.0:9411
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+nodeSelector:
+  monitoring: 'true'
+tolerations:
+- effect: NoSchedule
+  key: dedicated
+  operator: Equal
+  value: monitoring
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: standard
+service:
+  type: ClusterIP
+serviceMonitor:
+  enabled: false
